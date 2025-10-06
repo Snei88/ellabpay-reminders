@@ -1,0 +1,72 @@
+/* styles.css */
+:root { --ring: #137fec33; }
+* { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.chip {
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+.chip.selected {
+  background-color: #dbeafe !important;
+  color: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+}
+
+.collapsible-content {
+  display: none;
+  transition: all 0.3s ease;
+}
+
+.collapsible-trigger:checked ~ .collapsible-content {
+  display: block;
+}
+
+.collapsible-trigger:checked ~ label .material-symbols-outlined {
+  transform: rotate(180deg);
+}
+:root{
+  --primary:#137fec;
+  --success:#22c55e;      /* green-500 */
+  --danger:#ef4444;       /* red-500  */
+  --border:#e5e7eb;       /* gray-200 */
+  --border-dark:#374151;  /* gray-700 */
+}
+
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+  height:2.5rem; padding:0 .875rem;
+  border-radius:.5rem; border:1px solid transparent;
+  font-weight:600; font-size:.875rem; line-height:1;
+  transition:background-color .15s, border-color .15s, box-shadow .15s, transform .02s;
+  box-shadow:0 1px 1px rgba(0,0,0,.04);
+}
+.btn:active{ transform:translateY(1px); }
+.btn:focus-visible{ outline:none; box-shadow:0 0 0 3px rgba(19,127,236,.35); }
+
+.btn-primary{ background:var(--primary); color:#fff; }
+.btn-primary:hover{ filter:brightness(.95); }
+
+.btn-outline{ background:transparent; color:#111418; border-color:var(--border); }
+.dark .btn-outline{ color:#e5e7eb; border-color:var(--border-dark); }
+.btn-outline:hover{ background:rgba(17,20,24,.04); }
+.dark .btn-outline:hover{ background:rgba(255,255,255,.06); }
+
+.btn-danger{ background:var(--danger); color:#fff; }
+.btn-danger:hover{ filter:brightness(.95); }
+.btn-danger:focus-visible{ box-shadow:0 0 0 3px rgba(239,68,68,.35); }
+
+.btn-success{ background:var(--success); color:#fff; }
+.btn-success:hover{ filter:brightness(.95); }
+.btn-success:focus-visible{ box-shadow:0 0 0 3px rgba(34,197,94,.35); }
+
+.btn-ghost{ background:transparent; color:var(--primary); }
+.btn-ghost:hover{ background:rgba(19,127,236,.08); }
+
+.btn-sm{ height:2.25rem; padding:0 .75rem; font-size:.8125rem; }
+
+/* Card overlay actions */
+.js-card .js-actions{ opacity:0; pointer-events:none; }
+.js-card.is-open .js-actions{ opacity:1; pointer-events:auto; }
+
+.chip[aria-disabled="true"] { opacity:.45; pointer-events:none; }

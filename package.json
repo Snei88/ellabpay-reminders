@@ -1,0 +1,45 @@
+{
+  "name": "ellabpay-reminders",
+  "version": "1.0.0",
+  "description": "Recordatorios de pagos con notificaciones nativas (Electron).",
+  "main": "main.js",
+  "author": "Tu Nombre",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.tuorg.ellabpay",
+    "productName": "ElLabPay",
+    "files": [
+      "main.js",
+      "preload.js",
+      "pages/**/*",
+      "components/**/*",
+      "assets/**/*",
+      "styles.css",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "electron-store": "^11.0.0"
+  }
+}

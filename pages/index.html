@@ -1,0 +1,170 @@
+<!--
+  Página Principal (index.html)
+  Muestra tarjetas de Próximos Pagos y Pagos Atrasados.
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>ElLabPay – Resumen de Pagos</title>
+
+  <!-- Google Fonts + Icons -->
+  <link href="https://fonts.googleapis.com" rel="preconnect" />
+  <link crossorigin href="https://fonts.gstatic.com" rel="preconnect" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+
+  <script>
+    // Bootloader de tema: evita parpadeo y asegura consistencia entre páginas
+    (function () {
+      const KEY = 'ellabpay_theme'; // 'dark' | 'light' | null (auto)
+      const saved = localStorage.getItem(KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const wantDark = saved ? (saved === 'dark') : prefersDark;
+      if (wantDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      // Exponer helper opcional
+      window.__ELLABPAY_THEME__ = {
+        get: () => localStorage.getItem(KEY),
+        set: (v) => localStorage.setItem(KEY, v)
+      };
+    })();
+  </script>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#137fec",
+            "background-light": "#f6f7f8",
+            "background-dark": "#101922",
+          },
+          fontFamily: { display: ["Inter"] },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+        },
+      },
+    };
+  </script>
+
+  <!-- Estilos propios opcionales -->
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="icon" href="data:,">
+
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+  <div class="flex flex-col min-h-screen">
+    <!-- Header -->
+    <header class="bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-sm sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800">
+      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+          <!-- Logo -->
+          <div class="flex items-center gap-3">
+            <div class="text-primary">
+              <svg class="h-8 w-8" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M24 4H42V17.3333V30.6667H24V44H6V30.6667V17.3333H24V4Z"/>
+              </svg>
+            </div>
+            <h1 class="text-xl font-bold text-gray-900 dark:text-white">ElLabPay</h1>
+          </div>
+
+          <!-- Nav -->
+          <nav class="hidden md:flex items-center gap-6">
+            <a id="payments-nav" href="#" class="text-sm font-medium text-primary dark:text-primary">Pagos</a>
+            <a href="history.html" class="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors">Historial</a>
+          </nav>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2">
+            <button id="darkModeToggle" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Cambiar tema">
+              <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">dark_mode</span>
+            </button>
+            <button id="exportButton" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Exportar datos">
+              <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">download</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div class="flex flex-col lg:flex-row justify-between items-start gap-6 mb-8">
+        <div>
+          <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Resumen de Pagos</h2>
+          <p class="text-gray-500 dark:text-gray-400 mt-1">Aquí tienes un resumen de tus próximos pagos y pagos atrasados.</p>
+        </div>
+        <button id="addNewPaymentBtn" class="inline-flex items-center gap-2 bg-primary text-white font-semibold py-2.5 px-4 rounded-lg hover:bg-primary/90">
+          <span class="material-symbols-outlined text-xl">add</span>
+          Añadir Nuevo Pago
+        </button>
+      </div>
+
+      <div class="space-y-12">
+        <!-- Pagos Fijos -->
+        <section>
+          <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Pagos Fijos</h3>
+          <div id="fixedContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </section>
+
+        <!-- Próximos -->
+        <section>
+          <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Próximos Pagos</h3>
+          <div id="upcomingContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </section>
+
+        <!-- Atrasados -->
+        <section>
+          <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Pagos Atrasados</h3>
+          <div id="overdueContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Opcional: contenedor de modal (si luego reemplazas prompts por UI completa) -->
+  <div id="newPaymentModalRoot"></div>
+
+  <!-- Scripts (orden recomendado) -->
+    <script src="../components/payment-manager.js"></script>
+    <script src="../components/payment-cards.js"></script>
+    <script src="../components/payment-details.js"></script>
+    <script src="../components/newpay.js"></script>
+    <script src="../components/notification-manager.js"></script>
+    <script src="../components/app-enhancements.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Inicializa tarjetas
+      const cards = new PaymentCards();
+      cards.init();
+
+      // Inicializa recordatorios
+      if (typeof NotificationManager !== 'undefined') {
+        const nm = new NotificationManager();
+        nm.init();
+      }
+
+      // Botón "Añadir Nuevo Pago"
+      if (typeof NewPaymentModal !== 'undefined') {
+        const modal = new NewPaymentModal();
+        document.getElementById('addNewPaymentBtn')?.addEventListener('click', () => modal.open());
+      }
+
+      // Refrescar tarjetas ante cambios globales
+      const refresh = () => { const c = new PaymentCards(); c.init(); };
+      window.addEventListener('paymentAdded', refresh);
+      window.addEventListener('paymentStatusChanged', refresh);
+      window.addEventListener('paymentDeleted', refresh);
+      window.addEventListener('storage', e => { if (e.key === 'ellabpay_payments') refresh(); });
+    });
+  </script>
+</body>
+</html>

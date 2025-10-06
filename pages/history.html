@@ -1,0 +1,352 @@
+<!--
+  Página de Historial (history.html)
+  Tabla con buscador y filtros placeholder.
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>ElLabPay – Historial de Pagos</title>
+
+  <script>
+    // Bootloader de tema: evita parpadeo y asegura consistencia entre páginas
+    (function () {
+      const KEY = 'ellabpay_theme'; // 'dark' | 'light' | null (auto)
+      const saved = localStorage.getItem(KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const wantDark = saved ? (saved === 'dark') : prefersDark;
+      if (wantDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      // Exponer helper opcional
+      window.__ELLABPAY_THEME__ = {
+        get: () => localStorage.getItem(KEY),
+        set: (v) => localStorage.setItem(KEY, v)
+      };
+    })();
+  </script>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#137fec",
+            "background-light": "#f6f7f8",
+            "background-dark": "#101922",
+          },
+          fontFamily: { display: ["Inter"] },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+        },
+      },
+    };
+  </script>
+  <!-- Fonts + Icons -->
+  <link href="https://fonts.googleapis.com" rel="preconnect" />
+  <link crossorigin href="https://fonts.gstatic.com" rel="preconnect" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="icon" href="data:,">
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+  <div class="flex flex-col min-h-screen">
+    <!-- Header -->
+    <header class="bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-sm sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800">
+      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+          <!-- Logo -->
+          <div class="flex items-center gap-3">
+            <div class="text-primary">
+              <svg class="h-8 w-8" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M24 4H42V17.3333V30.6667H24V44H6V30.6667V17.3333H24V4Z"/>
+              </svg>
+            </div>
+            <h1 class="text-xl font-bold text-gray-900 dark:text-white">ElLabPay</h1>
+          </div>
+
+          <!-- Nav -->
+          <nav class="hidden md:flex items-center gap-6">
+            <a href="index.html" class="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors">Pagos</a>
+            <a href="#" class="text-sm font-medium text-primary dark:text-primary">Historial</a>
+          </nav>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2">
+            <button id="darkModeToggle" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Cambiar tema">
+              <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">dark_mode</span>
+            </button>
+            <button id="exportButton" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Exportar datos">
+              <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">download</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div class="flex flex-col gap-8">
+        <div>
+          <h2 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">Historial de Pagos</h2>
+          <p class="mt-2 text-gray-600 dark:text-gray-400">Revisa todos los pagos registrados.</p>
+        </div>
+    <!-- Search + Filters -->
+    <div class="flex flex-col md:flex-row gap-3 md:items-center">
+      <!-- Buscador -->
+      <div class="relative flex-grow w-full">
+        <span
+          class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
+          search
+        </span>
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Buscar pagos por nombre o descripción"
+          class="h-11 w-full pl-10 pr-4 rounded-lg border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+        />
+      </div>
+
+      <!-- Filtro Estado -->
+      <div class="relative flex-none">
+        <button
+          id="statusFilter"
+          class="h-11 shrink-0 min-w-40 px-4 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-2 justify-between whitespace-nowrap"
+        >
+          <span class="text-sm">Estado: <span id="statusFilterText">Todos</span></span>
+          <span class="material-symbols-outlined text-base">expand_more</span>
+        </button>
+
+        <!-- Dropdown: mismo ancho del botón -->
+        <div
+          id="statusDropdown"
+          class="hidden absolute top-full mt-1 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-lg z-20"
+        >
+          <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" data-status="all">Todos</a>
+          <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" data-status="Pendiente">Pendiente</a>
+          <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" data-status="Completado">Completado</a>
+          <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" data-status="Atrasado">Atrasado</a>
+          <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" data-status="Eliminado">Eliminado</a>
+        </div>
+      </div>
+    </div>
+
+
+        <!-- Table -->
+        <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead class="bg-gray-50 dark:bg-gray-800/50">
+              <tr>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nombre/Descripción</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Monto</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Estado</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="paymentTableBody" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700"></tbody>
+          </table>
+        </div>
+
+        <!-- Empty -->
+        <div id="noPaymentsMessage" class="text-center py-12 text-gray-500 dark:text-gray-400 hidden">
+          <p>No hay pagos registrados aún.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="../components/payment-manager.js"></script>
+  <script src="../components/app-enhancements.js"></script>
+
+  <script>
+    // Devuelve un Date con la "hora real" de vencimiento, tolerando varios formatos
+    function getDueAt(p) {
+      if (!p || !p.fecha) return null;
+
+      // Caso 1: ya viene ISO con hora (…T…)
+      if (typeof p.fecha === 'string' && /T\d{2}:\d{2}/.test(p.fecha)) {
+        return new Date(p.fecha); // respeta zona horaria del ISO
+      }
+
+      // Caso 2: fecha sin hora + hora guardada (HH:MM)
+      if (p.hora && /^\d{2}:\d{2}$/.test(p.hora)) {
+        return new Date(`${p.fecha}T${p.hora}:00`);
+      }
+
+      // Caso 3: solo fecha → asumir 09:00 local para no marcar atrasado a las 00:00
+      return new Date(`${p.fecha}T09:00:00`);
+    }
+
+    // Normaliza el estado visual a partir de la hora actual
+    function normalizedStatus(p, nowTs = Date.now()) {
+      if ((p.estado || '').toLowerCase() === 'completado') return 'Completado';
+      const due = getDueAt(p);
+      if (!due) return 'Pendiente';
+      // Tolerancia de 500ms para evitar falsos positivos por milisegundos
+      return (due.getTime() < nowTs - 500) ? 'Atrasado' : 'Pendiente';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const paymentTableBody = document.getElementById('paymentTableBody');
+      const noPaymentsMessage = document.getElementById('noPaymentsMessage');
+      const searchInput = document.getElementById('searchInput');
+      const statusFilter = document.getElementById('statusFilter');
+      const statusFilterText = document.getElementById('statusFilterText');
+      const statusDropdown = document.getElementById('statusDropdown');
+
+      let currentStatusFilter = 'all'; // 'all', 'Pendiente', 'Completado', 'Atrasado'
+
+
+
+      function renderPayments(payments = null) {
+        let data = payments ?? window.PaymentManager.getAllPayments(true); // incluir eliminados SIEMPRE
+       if (!Array.isArray(data)) data = [];
+          data.sort((a, b) => {
+          const ta = Date.parse(a.updatedAt || a.createdAt || a.fecha || 0) || 0;
+          const tb = Date.parse(b.updatedAt || b.createdAt || b.fecha || 0) || 0;
+          return tb - ta;
+        });
+        if (!data.length) {
+          paymentTableBody.innerHTML = '';
+          noPaymentsMessage.classList.remove('hidden');
+          return;
+        }
+        noPaymentsMessage.classList.add('hidden');
+
+        const html = data.map(p => {
+          const due = getDueAt(p);
+          const date = due ? due.toLocaleDateString('es-ES') : '—';
+          const amount = new Intl.NumberFormat('es-ES', { style: 'decimal' }).format(p.monto || 0);
+
+          const st = p.deleted ? 'Eliminado' : normalizedStatus(p);
+          const chip = p.deleted
+            ? 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+            : st === 'Completado' 
+              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+              : st === 'Atrasado'
+                ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+
+          const actionsHtml = `
+            <button class="js-hard-del inline-flex items-center gap-1.5 h-9 px-3 rounded-md border
+                           border-red-300 text-red-700 bg-red-50 hover:bg-red-100
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25
+                           dark:border-red-800 dark:text-red-300 dark:bg-red-900/30 dark:hover:bg-red-900/50"
+                    data-id="${p.id}">
+              <span class="material-symbols-outlined text-base">delete</span>
+              Eliminar
+            </button>`;
+
+          return `
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${date}</td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900 dark:text-white">${p.nombre}</div>
+                ${p.descripcion ? `<div class="text-sm text-gray-500 dark:text-gray-400">${p.descripcion}</div>` : ''}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">${amount}</td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${chip}">
+                  ${st}
+                </span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                ${actionsHtml}
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        paymentTableBody.innerHTML = html;
+      }
+
+      function applyFilters() {
+        const term = (searchInput.value || '').toLowerCase();
+        let filtered = window.PaymentManager.getAllPayments(true); // incluir eliminados
+        filtered = filtered.filter(p => (p.recurrencia || 'Único') === 'Único'); // excluir fijos
+
+        // Apply search filter
+        if (term) {
+          filtered = filtered.filter(p =>
+            (p.nombre || '').toLowerCase().includes(term) ||
+            (p.descripcion || '').toLowerCase().includes(term)
+          );
+        }
+
+        // Apply status filter
+        if (currentStatusFilter !== 'all') {
+          filtered = filtered.filter(p => {
+            const status = p.deleted ? 'Eliminado' : normalizedStatus(p);
+            return status === currentStatusFilter;
+          });
+        }
+
+        // Orden: lo más reciente primero (updatedAt → createdAt → fecha)
+        filtered.sort((a, b) => {
+          const ta = Date.parse(a.updatedAt || a.createdAt || a.fecha || 0) || 0;
+          const tb = Date.parse(b.updatedAt || b.createdAt || b.fecha || 0) || 0;
+          return tb - ta; // DESC
+        });
+
+        renderPayments(filtered);
+      }
+
+      // Status filter events
+      statusFilter.addEventListener('click', (e) => {
+        e.stopPropagation();
+        statusDropdown.classList.toggle('hidden');
+      });
+
+      statusDropdown.addEventListener('click', (e) => {
+        e.preventDefault();
+        const status = e.target.getAttribute('data-status');
+        if (status) {
+          currentStatusFilter = status;
+          statusFilterText.textContent = status === 'all' ? 'Todos' : status;
+          statusDropdown.classList.add('hidden');
+          applyFilters();
+        }
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', () => {
+        statusDropdown.classList.add('hidden');
+      });
+
+      // Event listener para botones de eliminar (delegación de eventos)
+      paymentTableBody.addEventListener('click', (e) => {
+        const hard = e.target.closest('.js-hard-del');
+        if (!hard) return;
+        const id = hard.dataset.id;
+        if (!id) return;
+
+        if (confirm('¿Eliminar definitivamente este registro del historial? Esta acción no se puede deshacer.')) {
+          window.PaymentManager.hardDelete(id);
+        }
+      });
+
+      // Init
+      //renderPayments();
+      applyFilters();
+      searchInput?.addEventListener('input', applyFilters);
+
+      // Refresh on global changes
+      const refresh = () => applyFilters();
+      window.addEventListener('storage', e => { if (e.key === 'ellabpay_payments') refresh(); });
+      window.addEventListener('paymentAdded', refresh);
+      window.addEventListener('paymentStatusChanged', refresh);
+      window.addEventListener('paymentDeleted', refresh);
+      window.addEventListener('paymentHardDeleted', refresh);
+    });
+  </script>
+</body>
+</html>

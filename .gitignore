@@ -1,0 +1,13 @@
+# Node/Electron
+node_modules
+dist
+out
+*.log
+.DS_Store
+Thumbs.db
+
+# Electron-builder artifacts
+/build
+/*.exe
+/*.AppImage
+/*.dmg
