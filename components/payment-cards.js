@@ -1,5 +1,11 @@
 // components/payment-cards.js
 
+// Helper para verificar si un pago está completado
+function isCompleted(p) {
+  const s = (p?.estado || '').toString().trim().toLowerCase();
+  return s === 'completado' || s === 'completo' || s === 'completed';
+}
+
 // Devuelve un Date con la "hora real" de vencimiento, tolerando varios formatos
 function getDueAt(p) {
   if (!p || !p.fecha) return null;
@@ -183,6 +189,7 @@ class PaymentCards {
                   text-red-700 bg-red-50 shadow-sm transition-colors
                   hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25
                   dark:border-red-800 dark:text-red-300 dark:bg-red-900/30 dark:hover:bg-red-900/50"
+            data-action="delete"
             data-id="${p.id}">
             Eliminar
           </button>

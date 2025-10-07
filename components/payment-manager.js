@@ -2,6 +2,24 @@
 (function () {
   const KEY = 'ellabpay_payments';
 
+  // --- CATEGORIES (fuente de verdad) ---
+  const DEFAULT_CATEGORIES = [
+    'Vivienda',
+    'Servicios',
+    'Internet/Telefonía',
+    'Suscripciones',
+    'Proveedores',
+    'Nómina',
+    'Impuestos y Tasas',
+    'Educación',
+    'Salud',
+    'Transporte',
+    'Seguros',
+    'Créditos/Tarjetas',
+    'Entretenimiento',
+    'Otros'
+  ];
+
   // --- helpers ---
   function blobToDataUrl(blob) {
     return new Promise((res, rej) => {
@@ -10,6 +28,23 @@
       r.onerror = rej;
       r.readAsDataURL(blob);
     });
+  }
+
+  // === Helpers de fecha para recurrencias ===
+  function toDateParts(iso) {
+    const d = new Date(iso);
+    return { y: d.getFullYear(), m: d.getMonth(), day: d.getDate(), hh: d.getHours(), mm: d.getMinutes(), ss: d.getSeconds() };
+  }
+  function pad2(n){ return String(n).padStart(2, '0'); }
+  function endOfMonth(year, month){ return new Date(year, month + 1, 0).getDate(); }
+
+  /** Deriva estado a partir de la fecha */
+  function deriveStatus(fechaISO){
+    if (!fechaISO) return 'Pendiente';
+    const now = Date.now();
+    const t = Date.parse(fechaISO);
+    if (isNaN(t)) return 'Pendiente';
+    return t < now ? 'Atrasado' : 'Pendiente';
   }
 
   const STATUSES = {
@@ -115,6 +150,76 @@
   }
 
   const PaymentManager = {
+    // --- CATEGORIES HELPERS ---
+    getCategories() {
+      try {
+        const raw = localStorage.getItem('ellabpay_categories');
+        const list = raw ? JSON.parse(raw) : null;
+        return (Array.isArray(list) && list.length) ? list : DEFAULT_CATEGORIES;
+      } catch { return DEFAULT_CATEGORIES; }
+    },
+
+    setCategories(list) {
+      if (Array.isArray(list) && list.length) {
+        localStorage.setItem('ellabpay_categories', JSON.stringify(list));
+        window.dispatchEvent(new Event('categoriesChanged'));
+      }
+    },
+
+    normalizeCategory(cat) {
+      const list = this.getCategories();
+      if (!cat) return 'Otros';
+      // intenta match insensible a mayúsculas/acentos
+      const norm = (s)=> s.toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().trim();
+      const i = list.findIndex(x => norm(x) === norm(cat));
+      return i >= 0 ? list[i] : 'Otros';
+    },
+
+    // --- ATTACHMENTS HELPERS ---
+    getById(id) {
+      const all = this.getAllPayments(true);
+      return all.find(x => x.id === id);
+    },
+
+    blobToDataUrl(blob) {
+      return blobToDataUrl(blob);
+    },
+
+    async addAttachment(id, fileOrAtt) {
+      const all = this.getAllPayments(true);
+      const p = all.find(x => x.id === id);
+      if (!p) return false;
+
+      let att = fileOrAtt;
+      if (!fileOrAtt.dataUrl) {
+        att = {
+          name: fileOrAtt.name,
+          type: fileOrAtt.type || 'application/octet-stream',
+          size: fileOrAtt.size || 0,
+          dataUrl: await this.blobToDataUrl(fileOrAtt),
+        };
+      }
+
+      p.attachments = Array.isArray(p.attachments) ? p.attachments : [];
+      p.attachments.push(att);
+      p.updatedAt = new Date().toISOString();
+      localStorage.setItem(KEY, JSON.stringify(all));
+      window.dispatchEvent(new Event('paymentUpdated'));
+      return true;
+    },
+
+    removeAttachment(id, index) {
+      const all = this.getAllPayments(true);
+      const p = all.find(x => x.id === id);
+      if (!p) return false;
+      p.attachments = Array.isArray(p.attachments) ? p.attachments : [];
+      p.attachments.splice(index, 1);
+      p.updatedAt = new Date().toISOString();
+      localStorage.setItem(KEY, JSON.stringify(all));
+      window.dispatchEvent(new Event('paymentUpdated'));
+      return true;
+    },
+
   // Lee y normaliza timestamps; opcionalmente normaliza estados
   getAllPayments(includeDeleted = false) {
     try {
@@ -174,6 +279,7 @@
         notasInternas: p.notasInternas || '',
         attachmentUrl: p.attachmentUrl || null,
         attachmentName: p.attachmentName || '',
+        attachments: Array.isArray(p.attachments) ? p.attachments : [],
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -204,6 +310,27 @@
         this.saveAll(list);
         window.dispatchEvent(new CustomEvent('paymentStatusChanged', { detail: list[idx] }));
       }
+    },
+
+    update(id, patch = {}) {
+      const list = this.getAllPayments(true);
+      const i = list.findIndex(p => p.id === id);
+      if (i < 0) return null;
+
+      const allow = new Set([
+        'nombre','descripcion','categoria','fecha','hora','monto',
+        'reminderOffsetsDays','metodoPago','recurrencia','notasInternas'
+      ]);
+
+      for (const k of Object.keys(patch)) {
+        if (!allow.has(k)) continue;
+        list[i][k] = (k === 'monto') ? Number(patch[k] || 0) : patch[k];
+      }
+      list[i].updatedAt = new Date().toISOString();
+
+      this.saveAll(list);
+      window.dispatchEvent(new CustomEvent('paymentUpdated', { detail: list[i] }));
+      return list[i];
     },
 
     delete(id) {
@@ -264,40 +391,71 @@
       }));
     },
 
-    markPaid(id, { createNextIfRecurring = true } = {}) {
-      const list = this.getAllPayments();
-      const idx = list.findIndex(p => p.id === id);
-      if (idx < 0) return;
+    // === Helpers de recurrencia ===
+    computeNextDueISO(fechaISO, recurrencia, horaStr) {
+      if (!fechaISO) return null;
+      const { y, m, day, hh, mm, ss } = toDateParts(fechaISO);
+      const [h2, m2] = (horaStr || `${pad2(hh)}:${pad2(mm)}`).split(':').map(x=>parseInt(x||'0',10));
 
-      // 1) marcar pagado
-      list[idx].estado = 'Completado';
-      list[idx].updatedAt = new Date().toISOString();   // ← IMPORTANTE
-      this.saveAll(list);
-      window.dispatchEvent(new CustomEvent('paymentStatusChanged', { detail: list[idx] }));
-
-      // 2) si tiene recurrencia, clonar con próxima fecha
-      const p = list[idx];
-      const nextISO = createNextIfRecurring ? computeNextDueISO(p.fecha, p.recurrencia) : null;
-      if (nextISO) {
-        const next = {
-          // id nuevo
-          nombre: p.nombre,
-          descripcion: p.descripcion,
-          categoria: p.categoria,
-          fecha: nextISO,
-          hora: p.hora,
-          monto: p.monto,
-          estado: 'Pendiente',
-          reminderOffsetsDays: p.reminderOffsetsDays,
-          metodoPago: p.metodoPago,
-          recurrencia: p.recurrencia,
-          notasInternas: p.notasInternas,
-          attachmentUrl: null,          // normalmente la nueva ocurrencia no hereda el archivo
-          attachmentName: ''
-        };
-        const created = this.addPayment(next);
-        scheduleRemindersFor(created);
+      if (!recurrencia || recurrencia.toLowerCase() === 'único' || recurrencia.toLowerCase() === 'unico') {
+        return null;
       }
+      if (recurrencia.toLowerCase().startsWith('mensual')) {
+        // Mes siguiente, respetando el mismo día si existe (clamp al fin de mes)
+        const ny = m === 11 ? y + 1 : y;
+        const nm = (m + 1) % 12;
+        const last = endOfMonth(ny, nm);
+        const nd = Math.min(day, last);
+        const next = new Date(ny, nm, nd, h2||0, m2||0, ss||0);
+        return next.toISOString();
+      }
+
+      // Puedes extender para 'Trimestral', 'Anual', etc.
+      return null;
+    },
+
+    // === Marcar como pagado (con soporte de recurrencia) ===
+    markPaid(id, opts = { moveNextIfRecurring: true }) {
+      const raw = localStorage.getItem(KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      const i = arr.findIndex(p => p.id === id);
+      if (i < 0) return false;
+
+      const p = arr[i];
+
+      // 1) Registrar histórico de pago
+      p._history = Array.isArray(p._history) ? p._history : [];
+      p._history.push({ paidAt: new Date().toISOString(), amount: Number(p.monto || 0) });
+
+      // 2) Si es recurrente mensual y se pide mover, ajustar a la próxima fecha
+      const rec = (p.recurrencia || '').toLowerCase();
+      if (opts.moveNextIfRecurring && rec && !rec.includes('único') && !rec.includes('unico')) {
+        const nextISO = this.computeNextDueISO(p.fecha, p.recurrencia, p.hora);
+        if (nextISO) {
+          p.fecha = nextISO;                  // mover al siguiente mes
+          p.estado = deriveStatus(nextISO);   // normalmente 'Pendiente'
+          p.updatedAt = new Date().toISOString();
+          // Nota: conservamos misma hora, recordatorios, etc.
+        } else {
+          p.estado = 'Completado';
+          p.updatedAt = new Date().toISOString();
+        }
+      } else {
+        // No recurrente → completar
+        p.estado = 'Completado';
+        p.updatedAt = new Date().toISOString();
+      }
+
+      arr[i] = p;
+      localStorage.setItem(KEY, JSON.stringify(arr));
+
+      // Notificar a la app
+      window.dispatchEvent(new Event('paymentStatusChanged'));
+      window.dispatchEvent(new Event('paymentsChanged'));
+
+      // Reagendar recordatorios para la "nueva" fecha
+      try { window.NotificationManager?.rescheduleAll?.(); } catch {}
+      return true;
     },
 
     // Exponer helpers si quieres usarlos en el render

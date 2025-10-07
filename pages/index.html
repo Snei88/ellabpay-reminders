@@ -83,11 +83,14 @@
 
           <!-- Actions -->
           <div class="flex items-center gap-2">
+            <!-- Botón Upload + input oculto (solo en INICIO) -->
+            <input id="bulkImportFile" type="file" accept=".csv,.json,.xlsx,.xls" hidden />
+            <button id="bulkImportBtn" class="inline-flex items-center gap-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600">
+              <span class="material-symbols-outlined text-xl">upload</span>
+              Subir Pagos
+            </button>
             <button id="darkModeToggle" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Cambiar tema">
               <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">dark_mode</span>
-            </button>
-            <button id="exportButton" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Exportar datos">
-              <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">download</span>
             </button>
           </div>
         </div>
@@ -163,8 +166,165 @@
       window.addEventListener('paymentAdded', refresh);
       window.addEventListener('paymentStatusChanged', refresh);
       window.addEventListener('paymentDeleted', refresh);
+      window.addEventListener('paymentUpdated', refresh);
       window.addEventListener('storage', e => { if (e.key === 'ellabpay_payments') refresh(); });
     });
+  </script>
+
+  <!-- Librería SheetJS para importar Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Script de importación masiva -->
+  <script>
+    (function () {
+      const btn = document.getElementById('bulkImportBtn');
+      const input = document.getElementById('bulkImportFile');
+
+      if (!btn || !input) return;
+
+      btn.addEventListener('click', () => input.click());
+
+      // --- Utilidades ---
+      function parseCSV(text) {
+        // Parser simple que respeta comillas
+        const lines = text.replace(/\r/g, '').split('\n').filter(Boolean);
+        if (!lines.length) return [];
+        const toCells = (line) => {
+          const out = [];
+          let cur = '', inQ = false;
+          for (let i=0; i<line.length; i++) {
+            const ch = line[i], nxt = line[i+1];
+            if (ch === '"' && inQ && nxt === '"') { cur += '"'; i++; continue; }
+            if (ch === '"') { inQ = !inQ; continue; }
+            if (ch === ',' && !inQ) { out.push(cur.trim()); cur = ''; continue; }
+            cur += ch;
+          }
+          out.push(cur.trim());
+          return out;
+        };
+        const headers = toCells(lines[0]).map(h => h.trim().toLowerCase());
+        return lines.slice(1).map(line => {
+          const cells = toCells(line);
+          const row = {};
+          headers.forEach((h, i) => row[h] = cells[i] ?? '');
+          return row;
+        });
+      }
+
+      function normalizeKey(key) {
+        // Normaliza las claves para que coincidan independientemente del formato
+        return String(key).toLowerCase()
+          .replace(/\s+/g, '')
+          .replace(/[áàäâ]/g, 'a')
+          .replace(/[éèëê]/g, 'e')
+          .replace(/[íìïî]/g, 'i')
+          .replace(/[óòöô]/g, 'o')
+          .replace(/[úùüû]/g, 'u')
+          .replace(/ñ/g, 'n');
+      }
+
+      function normalizeRow(row) {
+        // Normaliza las claves del objeto para facilitar el mapeo
+        const normalized = {};
+        for (const [key, value] of Object.entries(row)) {
+          const nKey = normalizeKey(key);
+          normalized[nKey] = value;
+        }
+        return normalized;
+      }
+
+      function parseFechaHora(row) {
+        // Soporta: ISO, "dd/mm/aaaa", "aaaa-mm-dd". Hora opcional en campo "hora"
+        const rawFecha = (row.fecha || row.date || '').trim();
+        const rawHora  = (row.hora || row.time || row.hour || '09:00').trim();
+        if (!rawFecha) return null;
+
+        // dd/mm/aaaa → aaaa-mm-dd
+        let ymd = rawFecha;
+        const m = rawFecha.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) {
+          const [_, d, mo, y] = m;
+          ymd = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        }
+        const iso = new Date(`${ymd}T${rawHora.length===5?rawHora:rawHora.slice(0,5)}:00`);
+        return isNaN(iso) ? null : iso.toISOString();
+      }
+
+      function toArray(val) {
+        if (!val) return [];
+        if (Array.isArray(val)) return val;
+        // "7|3|1|0" ó "7,3,1,0" ó "7, 3, 1, 0"
+        return String(val).split(/[|,]/).map(x => Number(x.trim())).filter(n => Number.isFinite(n));
+      }
+
+      input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          let rows = [];
+          const fileName = file.name.toLowerCase();
+          
+          // Detectar tipo de archivo
+          if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+            // Leer archivo Excel
+            const arrayBuffer = await file.arrayBuffer();
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            rows = XLSX.utils.sheet_to_json(firstSheet);
+          } else if (fileName.endsWith('.json')) {
+            // Leer JSON
+            const text = await file.text();
+            rows = JSON.parse(text);
+          } else {
+            // Leer CSV
+            const text = await file.text();
+            rows = parseCSV(text);
+          }
+
+          let created = 0;
+          for (const r of rows) {
+            // Normalizar claves
+            const nr = normalizeRow(r);
+            
+            // Mapear campos con diferentes nombres posibles
+            const fechaISO = parseFechaHora({
+              fecha: nr.fecha || nr.date,
+              hora: nr.hora || nr.time || nr.hour
+            });
+            
+            if (!fechaISO) continue;
+
+            const pago = {
+              nombre: nr.nombre || nr.name || 'Pago',
+              descripcion: nr.descripcion || nr.description || '',
+              categoria: nr.categoria || nr.category || '',
+              fecha: fechaISO,
+              hora: (nr.hora || nr.time || nr.hour || '09:00').slice(0,5),
+              monto: Number(nr.monto || nr.amount || 0) || 0,
+              estado: (nr.estado || nr.status || '').trim(),
+              reminderOffsetsDays: toArray(nr.recordatorios || nr.recordatoriosdias || nr.reminders || [7,3,1,0]),
+              metodoPago: nr.metodopago || nr.metododepago || nr.paymentmethod || '',
+              recurrencia: nr.recurrencia || nr.recurrence || 'Único',
+              notasInternas: nr.notas || nr.notes || '',
+              attachmentUrl: null,
+              attachmentName: ''
+            };
+
+            // Usa tu fuente de verdad para guardar (dispara eventos y agenda recordatorios)
+            const createdRec = window.PaymentManager?.addPayment?.(pago);
+            if (createdRec) created++;
+          }
+
+          // refresca tarjetas en Inicio (sus oyentes ya escuchan paymentAdded/storage)
+          alert(`Se importaron ${created} pago(s).`);
+        } catch (err) {
+          console.error(err);
+          alert('No se pudo importar el archivo. Revisa el formato.');
+        } finally {
+          input.value = '';
+        }
+      });
+    })();
   </script>
 </body>
 </html>

@@ -38,6 +38,8 @@ class NotificationManager {
     const existingIds = new Set(Object.keys(allExistingReminders || {}));
 
     const wantedIds = new Set();
+    const now = new Date();
+    const MAX_STEPS = 24; // seguridad para evitar loops infinitos
 
     for (const p of payments) {
       // sólo notificar pagos pendientes / programados
@@ -46,29 +48,41 @@ class NotificationManager {
       const due = new Date(p.fecha);
       if (Number.isNaN(due.getTime())) continue;
 
-      const base = Array.isArray(p.reminderOffsetsDays) ? p.reminderOffsetsDays : [];
-      const offsets = Array.from(new Set([...base, 0])); // 0d garantizado
+      const offsets = Array.isArray(p.reminderOffsetsDays) ? p.reminderOffsetsDays : [];
+      const isRecurring = (p.recurrencia||'').toLowerCase() !== 'único' && (p.recurrencia||'').toLowerCase() !== 'unico';
 
       for (const d of offsets) {
-        const id = `pay_${p.id}__d${d}`;
-        wantedIds.add(id);
+        let targetDue = new Date(p.fecha);
+        let when = this.atTime(this.addDays(targetDue, -d), p.hora || '09:00');
 
-        const when = this.atTime(this.addDays(due, -d), p.hora || '09:00');
-        if (when <= new Date()) continue; // No agendar en pasado
+        // Si el recordatorio ya quedó en el pasado y es recurrente, pasa a próxima ocurrencia
+        let steps = 0;
+        while (when <= now && isRecurring && steps < MAX_STEPS) {
+          const nextISO = window.PaymentManager?.computeNextDueISO?.(targetDue.toISOString(), p.recurrencia, p.hora);
+          if (!nextISO) break;
+          targetDue = new Date(nextISO);
+          when = this.atTime(this.addDays(targetDue, -d), p.hora || '09:00');
+          steps++;
+        }
 
-        const reminder = {
-          id,
-          reminderTime: when.toISOString(),
-          title: `Recordatorio: ${p.nombre}`,
-          description: `Vence ${due.toLocaleDateString('es-ES')}${p.monto ? ` • Monto: ${new Intl.NumberFormat('es-ES').format(p.monto)}` : ''}`,
-          paymentId: p.id,
-        };
+        // Programa solo si está a futuro
+        if (when > now) {
+          const id = `${p.id}::d${d}`;
+          wantedIds.add(id);
 
-        await window.RemindersAPI?.save?.(reminder);
+          const reminder = {
+            id,
+            reminderTime: when.toISOString(),
+            title: `Recordatorio: ${p.nombre}`,
+            description: `Vence ${targetDue.toLocaleDateString('es-ES')}${p.monto ? ` • Monto: ${new Intl.NumberFormat('es-ES').format(p.monto)}` : ''}`,
+            paymentId: p.id,
+          };
+
+          await window.RemindersAPI?.save?.(reminder);
+        }
       }
 
       // Extra: si está vencido y NO pagado, un "nudge" hoy a las 10:00
-      const now = new Date();
       if (due < now && (!p.estado || p.estado.toLowerCase() !== 'completado')) {
         const nudgeId = `pay_${p.id}__overdue`;
         wantedIds.add(nudgeId);

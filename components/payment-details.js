@@ -1,4 +1,11 @@
 // components/payment-details.js
+
+// Helper para verificar si un pago está completado
+function isCompleted(p) {
+  const s = (p?.estado || '').toString().trim().toLowerCase();
+  return s === 'completado' || s === 'completo' || s === 'completed';
+}
+
 class PaymentDetailsModal {
   static ensureRoot() {
     let root = document.getElementById('paymentDetailsRoot');
@@ -66,7 +73,27 @@ class PaymentDetailsModal {
                 </div>
                 <div class="flex flex-col">
                   <span class="text-sm font-medium text-gray-500 dark:text-gray-300">Monto</span>
-                  <p class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">${amountStr}</p>
+
+                  <div class="flex items-center gap-3">
+                    <p id="pd_amount_value" class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">${amountStr}</p>
+
+                    ${((p.recurrencia || 'Único') !== 'Único' && (p.estado || '').toLowerCase() !== 'completado')
+                      ? `<button id="pd_amount_edit" class="h-8 px-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-200 dark:hover:bg-gray-600">
+                           Editar
+                         </button>` : ''
+                    }
+                  </div>
+
+                  <div id="pd_amount_edit_wrap" class="hidden mt-2 flex items-center gap-2">
+                    <div class="relative">
+                      <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-[#617589] dark:text-gray-400 text-sm">$</span>
+                      <input id="pd_amount_input" type="number" step="0.01"
+                             class="form-input h-10 w-40 rounded-lg pl-7 text-sm bg-white dark:bg-gray-800 text-[#111418] dark:text-white"
+                             value="${(Number(p.monto || 0)).toFixed(2)}" />
+                    </div>
+                    <button id="pd_amount_save" class="h-8 px-3 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700">Guardar</button>
+                    <button id="pd_amount_cancel" class="h-8 px-3 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-200 dark:hover:bg-gray-600">Cancelar</button>
+                  </div>
                 </div>
               </div>
 
@@ -111,17 +138,26 @@ class PaymentDetailsModal {
                   ` : ''}
 
                   <!-- Adjuntos (solo pagos recurrentes) -->
-                  <div id="attBlock" class="space-y-3">
+                  <div id="pd-attachments" class="space-y-3">
                     <div class="text-sm font-medium text-gray-600 dark:text-gray-300">Comprobantes</div>
+                    <div id="pd-att-list" class="space-y-2"></div>
 
-                    <div id="attDrop" class="flex items-center justify-center h-28 rounded-lg border-2 border-dashed
-                         border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800
-                         text-gray-500 dark:text-gray-400 text-sm cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
-                      Pega aquí (Ctrl + V), arrastra una imagen o haz click
-                      <input id="attFile" type="file" accept="image/*" class="hidden">
+                    <div class="mt-3">
+                      <input id="pd-att-input" type="file" multiple accept="*/*" class="w-full text-sm text-gray-500 dark:text-gray-400
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-lg file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-primary file:text-white
+                        hover:file:bg-primary/90
+                        cursor-pointer" />
+                      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Se aceptan PDF, Excel, Word, imágenes, etc.</p>
                     </div>
+                  </div>
 
-                    <div id="attGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+                  <!-- Histórico de pagos -->
+                  <div class="mt-4 border-t border-gray-200 dark:border-gray-600 pt-4" id="pd-history">
+                    <div class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Histórico de pagos</div>
+                    <div id="pd-history-list" class="space-y-2 text-sm text-gray-800 dark:text-gray-200"></div>
                   </div>
                 </div>
               </div>
@@ -166,12 +202,14 @@ class PaymentDetailsModal {
               <button class="w-full sm:w-auto px-4 py-2.5 bg-transparent text-gray-600 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
                       data-close="true">Cerrar</button>
 
+              ${!isCompleted(p) ? `
               <div class="flex gap-3 w-full sm:w-auto">
                 <button id="pd_only_paid"
                         class="w-full sm:w-auto px-4 py-2.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 font-semibold rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-900/50">
                   Marcar como pagado
                 </button>
               </div>
+              ` : ''}
             </footer>
           </div>
         </div>
@@ -205,21 +243,26 @@ class PaymentDetailsModal {
       el.addEventListener('click', () => root.classList.add('hidden'))
     );
 
-    // Solo marcar pagado (no crea la siguiente)
-    root.querySelector('#pd_only_paid')?.addEventListener('click', () => {
-  const fresh = window.PaymentManager.getAllPayments(true).find(x => x.id === p.id);
-  if (!fresh) return;
+    // Solo marcar pagado (mueve fecha si es recurrente)
+    const markBtn = root.querySelector('#pd_only_paid');
+    if (markBtn) {
+      markBtn.addEventListener('click', () => {
+        const fresh = window.PaymentManager.getAllPayments(true).find(x => x.id === p.id);
+        if (!fresh) return;
 
-  const due = (typeof getDueAt === 'function') ? getDueAt(fresh) : (fresh.fecha ? new Date(fresh.fecha) : null);
+        const due = (typeof getDueAt === 'function') ? getDueAt(fresh) : (fresh.fecha ? new Date(fresh.fecha) : null);
 
-  if (due && Date.now() < due.getTime()) {
-    const ok = confirm(`Aún no llega la fecha (${due.toLocaleString('es-ES')}). ¿Marcar como pagado por adelantado?`);
-    if (!ok) return;
-  }
+        if (due && Date.now() < due.getTime()) {
+          const ok = confirm(`Aún no llega la fecha (${due.toLocaleString('es-ES')}). ¿Marcar como pagado por adelantado?`);
+          if (!ok) return;
+        }
 
-  window.PaymentManager.markPaid(p.id, { createNextIfRecurring: false });
-  root.classList.add('hidden');
-    });
+        window.PaymentManager.markPaid(p.id, { moveNextIfRecurring: true });
+        root.classList.add('hidden');
+        // Refrescar la vista
+        window.location.reload();
+      });
+    }
 
     // Marcar pagado y crear siguiente (si aplica la recurrencia)
     root.querySelector('#pd_paid_and_next')?.addEventListener('click', () => {
@@ -238,65 +281,123 @@ class PaymentDetailsModal {
     });
 
     // Wire attachments para pagos recurrentes
-    (function wireAttachments(payment) {
+    (function initAttachmentsSection(payment) {
       if ((payment.recurrencia || 'Único') === 'Único') return; // solo recurrentes
 
-      const drop = document.getElementById('attDrop');
-      const file = document.getElementById('attFile');
-      const grid = document.getElementById('attGrid');
+      const listEl = document.getElementById('pd-att-list');
+      const inputEl = document.getElementById('pd-att-input');
 
-      // abrir selector al click
-      drop.addEventListener('click', () => file.click());
+      if (!listEl || !inputEl) return;
 
-      // soltar
-      drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('ring-2','ring-primary'); });
-      drop.addEventListener('dragleave', () => drop.classList.remove('ring-2','ring-primary'));
-      drop.addEventListener('drop', async (e) => {
-        e.preventDefault(); drop.classList.remove('ring-2','ring-primary');
-        const img = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
-        if (img) await window.PaymentManager.addAttachmentFromBlob(payment.id, img);
-        renderGrid();
-      });
-
-      // pegar desde portapapeles
-      drop.addEventListener('paste', async (e) => {
-        const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
-        if (!item) return;
-        const blob = item.getAsFile();
-        if (blob) await window.PaymentManager.addAttachmentFromBlob(payment.id, blob);
-        renderGrid();
-      });
-
-      // input file
-      file.addEventListener('change', async () => {
-        const img = file.files?.[0]; if (!img) return;
-        await window.PaymentManager.addAttachmentFromBlob(payment.id, img);
-        file.value = ''; renderGrid();
-      });
-
-      function renderGrid() {
-        const fresh = window.PaymentManager.getAllPayments(true).find(p => p.id === payment.id) || payment;
-        const atts = fresh.attachments || [];
-        grid.innerHTML = atts.map(a => `
-          <div class="relative group">
-            <img src="${a.dataUrl}" alt="comprobante" class="w-full h-28 object-cover rounded-md border border-gray-200 dark:border-gray-700">
-            <button data-att="${a.id}" class="js-att-del opacity-0 group-hover:opacity-100 transition
-                    absolute top-1 right-1 bg-black/60 text-white text-xs px-2 py-1 rounded">
+      function renderList() {
+        const fresh = window.PaymentManager.getById(payment.id);
+        const atts = Array.isArray(fresh?.attachments) ? fresh.attachments : [];
+        if (!atts.length) {
+          listEl.innerHTML = '<div class="text-gray-400 dark:text-gray-500 text-sm">— Sin archivos —</div>';
+          return;
+        }
+        listEl.innerHTML = atts.map((a, i) => `
+          <div class="flex items-center justify-between border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-gray-50 dark:bg-gray-800">
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                <a href="${a.dataUrl}" download="${a.name}" target="_blank" class="hover:underline text-primary">${a.name || '(archivo)'}</a>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">${a.type || ''} ${a.size ? `• ${Math.round(a.size/1024)} KB` : ''}</div>
+            </div>
+            <button class="ml-3 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors" data-remove="${i}">
               Quitar
             </button>
           </div>
-        `).join('') || '<div class="text-xs text-gray-500 dark:text-gray-400">Sin comprobantes</div>';
+        `).join('');
+
+        listEl.querySelectorAll('[data-remove]').forEach(btn => {
+          btn.onclick = () => {
+            const idx = Number(btn.dataset.remove);
+            window.PaymentManager.removeAttachment(payment.id, idx);
+            renderList();
+          };
+        });
       }
 
-      grid.addEventListener('click', (e) => {
-        const del = e.target.closest('.js-att-del');
-        if (!del) return;
-        window.PaymentManager.removeAttachment(payment.id, del.dataset.att);
-        renderGrid();
-      });
+      renderList();
 
-      renderGrid();
+      inputEl.addEventListener('change', async () => {
+        if (!inputEl.files?.length) return;
+        for (const f of inputEl.files) {
+          await window.PaymentManager.addAttachment(payment.id, f);
+        }
+        inputEl.value = '';
+        renderList();
+      });
     })(p);
+
+    // Wire histórico de pagos para pagos recurrentes
+    (function initHistorySection(payment) {
+      if ((payment.recurrencia || 'Único') === 'Único') return; // solo recurrentes
+
+      const wrap = document.getElementById('pd-history');
+      const listEl = document.getElementById('pd-history-list');
+      if (!wrap || !listEl) return;
+
+      function renderHistory() {
+        const fresh = window.PaymentManager.getById(payment.id);
+        const hist = Array.isArray(fresh?._history) ? [...fresh._history] : [];
+
+        if (!hist.length) {
+          listEl.innerHTML = '<div class="text-gray-400 dark:text-gray-500">— Sin registros —</div>';
+          return;
+        }
+
+        // Orden descendente por fecha de pago
+        hist.sort((a, b) => new Date(b.paidAt) - new Date(a.paidAt));
+
+        listEl.innerHTML = hist.map(h => `
+          <div class="flex items-center justify-between border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-800">
+            <span class="text-gray-700 dark:text-gray-300">${new Date(h.paidAt).toLocaleString('es-ES', { dateStyle:'medium', timeStyle:'short' })}</span>
+            <span class="font-semibold text-emerald-600 dark:text-emerald-400">$${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2 }).format(h.amount || 0)}</span>
+          </div>
+        `).join('');
+      }
+
+      // Render inicial
+      renderHistory();
+
+      // Re-render cuando cambie estado o se actualice el pago
+      const rerender = () => renderHistory();
+      window.addEventListener('paymentStatusChanged', rerender);
+      window.addEventListener('paymentUpdated', rerender);
+    })(p);
+
+    // ----- Editar monto (sólo si existe el botón) -----
+    (() => {
+      const btnEdit   = root.querySelector('#pd_amount_edit');
+      const wrapEdit  = root.querySelector('#pd_amount_edit_wrap');
+      const input     = root.querySelector('#pd_amount_input');
+      const viewValue = root.querySelector('#pd_amount_value');
+
+      if (!btnEdit || !wrapEdit || !input || !viewValue) return;
+
+      const showEdit = (v) => wrapEdit.classList.toggle('hidden', !v);
+
+      btnEdit.addEventListener('click', () => showEdit(true));
+      root.querySelector('#pd_amount_cancel')?.addEventListener('click', () => showEdit(false));
+
+      root.querySelector('#pd_amount_save')?.addEventListener('click', () => {
+        const val = Number.parseFloat(String(input.value).replace(',', '.'));
+        if (!Number.isFinite(val) || val < 0) {
+          alert('Ingresa un monto válido (>= 0).');
+          return;
+        }
+
+        const updated = window.PaymentManager.update(p.id, { monto: val });
+        if (updated) {
+          // Refresca el texto mostrado
+          const pretty = `$${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)}`;
+          viewValue.textContent = pretty;
+          showEdit(false);
+        }
+      });
+    })();
   }
 }
 

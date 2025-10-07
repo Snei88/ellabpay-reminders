@@ -1,4 +1,4 @@
-<!--
+<s></s><!--
   Página de Historial (history.html)
   Tabla con buscador y filtros placeholder.
 -->
@@ -83,7 +83,7 @@
             <button id="darkModeToggle" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Cambiar tema">
               <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">dark_mode</span>
             </button>
-            <button id="exportButton" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Exportar datos">
+            <button id="btnExportHistory" class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600" aria-label="Descargar historial">
               <span class="material-symbols-outlined text-gray-600 dark:text-gray-300">download</span>
             </button>
           </div>
@@ -347,6 +347,112 @@
       window.addEventListener('paymentDeleted', refresh);
       window.addEventListener('paymentHardDeleted', refresh);
     });
+  </script>
+
+  <!-- Librería SheetJS para exportar a Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Script de exportación Excel -->
+  <script>
+    (function () {
+      const BTN_ID = 'btnExportHistory';
+      const KEY = 'ellabpay_payments';
+
+      // Utilidad: obtén TODOS los pagos (incluidos completados/atrasados)
+      function getAllPaymentsSafe() {
+        try {
+          // Usa PaymentManager si existe
+          if (window.PaymentManager?.getAllPayments) {
+            const list = window.PaymentManager.getAllPayments(true);
+            if (Array.isArray(list)) return list;
+          }
+        } catch (e) {}
+        // Fallback directo al storage
+        try {
+          const raw = localStorage.getItem(KEY);
+          const arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr : [];
+        } catch (e) {
+          return [];
+        }
+      }
+
+      function downloadExcel(rows) {
+        // Preparar datos para Excel
+        const data = rows.map(p => {
+          const recordatorios = Array.isArray(p.reminderOffsetsDays)
+            ? p.reminderOffsetsDays.join(', ') : '';
+          const adjuntos = Array.isArray(p.attachments)
+            ? p.attachments.map(a => a?.name || '').join(', ') : '';
+
+          return {
+            'ID': p.id || '',
+            'Nombre': p.nombre || '',
+            'Descripción': p.descripcion || '',
+            'Fecha': p.fecha || '',
+            'Hora': p.hora || '',
+            'Monto': p.monto || 0,
+            'Estado': p.estado || '',
+            'Categoría': p.categoria || '',
+            'Método de Pago': p.metodoPago || '',
+            'Recurrencia': p.recurrencia || 'Único',
+            'Recordatorios (días)': recordatorios,
+            'Notas': p.notasInternas || '',
+            'Adjuntos': adjuntos
+          };
+        });
+
+        // Crear libro de trabajo
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+
+        // Ajustar ancho de columnas
+        const colWidths = [
+          { wch: 10 },  // ID
+          { wch: 20 },  // Nombre
+          { wch: 30 },  // Descripción
+          { wch: 12 },  // Fecha
+          { wch: 8 },   // Hora
+          { wch: 12 },  // Monto
+          { wch: 12 },  // Estado
+          { wch: 15 },  // Categoría
+          { wch: 15 },  // Método de Pago
+          { wch: 12 },  // Recurrencia
+          { wch: 20 },  // Recordatorios
+          { wch: 30 },  // Notas
+          { wch: 30 }   // Adjuntos
+        ];
+        ws['!cols'] = colWidths;
+
+        // Agregar hoja al libro
+        XLSX.utils.book_append_sheet(wb, ws, 'Historial de Pagos');
+
+        // Descargar archivo
+        const fileName = `historial_ellabpay_${new Date().toISOString().slice(0,10)}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+      }
+
+      // Wire del botón
+      function wireExportButton() {
+        const btn = document.getElementById(BTN_ID);
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+          const rows = getAllPaymentsSafe();
+          if (!rows.length) {
+            alert('No hay pagos para descargar.');
+            return;
+          }
+          downloadExcel(rows);
+        }, { once: false });
+      }
+
+      // Espera al DOM listo
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', wireExportButton);
+      } else {
+        wireExportButton();
+      }
+    })();
   </script>
 </body>
 </html>

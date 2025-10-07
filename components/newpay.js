@@ -5,38 +5,63 @@ class NewPaymentModal {
     this.defaultOffsets = [7, 3, 1,];
     this.rendered = false;
   }
+  
   getAllowedMaxDays() {
-  const dt = this.root.querySelector('#np_datetime')?.value
-           || `${this.root.querySelector('#np_fecha')?.value || ''}T${this.root.querySelector('#np_hora')?.value || '09:00'}`;
-  if (!dt || isNaN(new Date(dt))) return 365; // por si falta la fecha, no bloquees
-  const due = new Date(dt);
-  const now = new Date();
-  const diffMs = due - now;
-  return Math.max(0, Math.floor(diffMs / 86400000)); // días completos restantes
+    const dt = this.root.querySelector('#np_datetime')?.value
+             || `${this.root.querySelector('#np_fecha')?.value || ''}T${this.root.querySelector('#np_hora')?.value || '09:00'}`;
+    if (!dt || isNaN(new Date(dt))) return 365; // por si falta la fecha, no bloquees
+    const due = new Date(dt);
+    const now = new Date();
+    const diffMs = due - now;
+    return Math.max(0, Math.floor(diffMs / 86400000)); // días completos restantes
+  }
+
+  isRecurringValue(v) {
+    const s = (v || '').toLowerCase();
+    return s && s !== 'único' && s !== 'unico';
   }
 
   updateReminderChipsAvailability() {
     const maxDays = this.getAllowedMaxDays();
-    // deshabilita chips > maxDays
+    const selRec = this.root.querySelector('#np_recurrencia');
+    const recurring = this.isRecurringValue(selRec?.value);
+
+    // deshabilita chips > maxDays solo si NO es recurrente
     this.root.querySelectorAll('#np_offsets_group .chip').forEach(btn => {
       const v = parseInt(btn.dataset.value, 10);
-      const disable = Number.isFinite(v) && v > maxDays;
-      btn.setAttribute('aria-disabled', disable ? 'true' : 'false');
-      btn.classList.toggle('opacity-40', disable);
-      btn.classList.toggle('pointer-events-none', disable);
-      if (disable) btn.classList.remove('selected');
+      const past = Number.isFinite(v) && v > maxDays;
+
+      if (!recurring) {
+        // Pago ÚNICO: deshabilitar si cae en el pasado
+        btn.setAttribute('aria-disabled', past ? 'true' : 'false');
+        btn.classList.toggle('opacity-40', past);
+        btn.classList.toggle('pointer-events-none', past);
+        if (past) btn.classList.remove('selected');
+        btn.title = '';
+      } else {
+        // Pago RECURRENTE: nunca bloquear por estar en pasado
+        btn.setAttribute('aria-disabled', 'false');
+        btn.classList.remove('opacity-40', 'pointer-events-none');
+        btn.title = past ? 'Se aplicará desde la próxima fecha' : '';
+      }
     });
 
-    // ajusta límites del “Otro”
+    // ajusta límites del "Otro"
     const input = this.root.querySelector('#np_offset_custom');
     if (input) {
-      input.min = 1;
-      input.max = String(maxDays);
-      input.placeholder = maxDays > 0 ? `≤ ${maxDays}d` : '—';
-      if (Number(input.value) > maxDays) input.value = '';
+      if (!recurring) {
+        input.min = 1;
+        input.max = String(maxDays);
+        input.placeholder = maxDays > 0 ? `≤ ${maxDays}d` : '—';
+        if (Number(input.value) > maxDays) input.value = '';
+      } else {
+        // Recurrente: sin límite estricto
+        input.min = 1;
+        input.max = 365;
+        input.placeholder = '+ Otro';
+      }
     }
   }
-
 
   ensureRoot() {
     const div = document.createElement('div');
@@ -153,16 +178,15 @@ class NewPaymentModal {
                   </div>
                   <label class="flex flex-col">
                     <p class="text-[#111418] dark:text-white text-sm font-medium leading-normal pb-2">Subir archivo / Adjuntar comprobante</p>
-                    <div class="flex items-center justify-center w-full">
-                      <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700" for="np_file">
-                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                          <span class="material-symbols-outlined text-gray-500 dark:text-gray-400">cloud_upload</span>
-                          <p class="mb-2 text-sm text-gray-500 dark:text-gray-400"><span class="font-semibold">Click to upload</span> or drag and drop</p>
-                          <p class="text-xs text-gray-500 dark:text-gray-400">SVG, PNG, JPG or GIF (MAX. 800x400px)</p>
-                        </div>
-                        <input id="np_file" type="file" class="hidden" />
-                      </label>
-                    </div>
+                    <input id="np-attachments" type="file" multiple accept="*/*" class="w-full text-sm text-gray-500 dark:text-gray-400
+                      file:mr-4 file:py-2 file:px-4
+                      file:rounded-lg file:border-0
+                      file:text-sm file:font-semibold
+                      file:bg-primary file:text-white
+                      hover:file:bg-primary/90
+                      cursor-pointer" />
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Se aceptan PDF, Excel, Word, imágenes, etc.</p>
+                    <div id="np-att-count" class="text-xs text-gray-600 dark:text-gray-400 mt-2"></div>
                   </label>
                   <label class="flex flex-col">
                     <p class="text-[#111418] dark:text-white text-sm font-medium leading-normal pb-2">Notas internas</p>
@@ -185,25 +209,34 @@ class NewPaymentModal {
     const closeButtons = this.root.querySelectorAll('[data-close="true"]');
     closeButtons.forEach(btn => btn.addEventListener('click', () => this.close()));
 
+    // Popular categorías dinámicamente
+    (() => {
+      const sel = this.root.querySelector('#np_categoria');
+      if (!sel) return;
+      const cats = (window.PaymentManager?.getCategories?.() || []);
+      sel.innerHTML = '<option value="">Seleccionar categoría</option>' +
+                      cats.map(c => `<option>${c}</option>`).join('');
+    })();
+
     // Toggle visual de chips
     this.root.querySelectorAll('#np_offsets_group .chip').forEach(btn => {
       btn.addEventListener('click', () => btn.classList.toggle('selected'));
     });
     
-
     // Añadir offset personalizado
     this.root.querySelector('#np_add_custom').addEventListener('click', () => {
       const input = this.root.querySelector('#np_offset_custom');
       const val = parseInt((input.value || '').trim(), 10);
-      const maxDays = this.getAllowedMaxDays();
+      const selRec = this.root.querySelector('#np_recurrencia');
+      const recurring = this.isRecurringValue(selRec?.value);
+      const maxDays = recurring ? 365 : this.getAllowedMaxDays();
 
-    if (!Number.isFinite(val) || val < 1 || val > maxDays) {
-      // opcional: feedback sutil
-      input.classList.add('ring-2','ring-red-300');
-      setTimeout(()=>input.classList.remove('ring-2','ring-red-300'), 800);
-      return;
-    }
-
+      if (!Number.isFinite(val) || val < 1 || val > maxDays) {
+        // opcional: feedback sutil
+        input.classList.add('ring-2','ring-red-300');
+        setTimeout(()=>input.classList.remove('ring-2','ring-red-300'), 800);
+        return;
+      }
 
       const group = this.root.querySelector('#np_offsets_group');
       const chip = document.createElement('button');
@@ -212,7 +245,7 @@ class NewPaymentModal {
       chip.dataset.value = String(val);
       chip.textContent = `${val}d`;
       chip.addEventListener('click', () => chip.classList.toggle('selected'));
-      group.insertBefore(chip, group.lastElementChild); // antes del “+ Otro”
+      group.insertBefore(chip, group.lastElementChild); // antes del "+ Otro"
       input.value = '';
     });
 
@@ -221,7 +254,9 @@ class NewPaymentModal {
       e.preventDefault();
       const nombre = this.root.querySelector('#np_nombre').value.trim();
       const descripcion = this.root.querySelector('#np_descripcion').value.trim();
-      const categoria = this.root.querySelector('#np_categoria').value;
+      const categoria = window.PaymentManager?.normalizeCategory
+        ? window.PaymentManager.normalizeCategory(this.root.querySelector('#np_categoria').value)
+        : (this.root.querySelector('#np_categoria').value || 'Otros');
       const metodo = this.root.querySelector('#np_metodo')?.value || '';
       const recurrencia = this.root.querySelector('#np_recurrencia')?.value || 'Único';
       const notas = this.root.querySelector('#np_notas')?.value?.trim() || '';
@@ -241,19 +276,37 @@ class NewPaymentModal {
         .map(el => parseInt(el.dataset.value, 10))
         .filter(n => Number.isFinite(n));
 
-      const maxDays = this.getAllowedMaxDays();
+      // Para pagos recurrentes, no filtrar por maxDays
+      const recurring = this.isRecurringValue(recurrencia);
+      let offsets;
+      if (recurring) {
+        offsets = Array.from(new Set([...selected, 0]))
+          .filter(n => n >= 0)
+          .sort((a, b) => a - b);
+      } else {
+        const maxDays = this.getAllowedMaxDays();
+        offsets = Array.from(new Set([...selected, 0]))
+          .filter(n => n >= 0 && n <= maxDays)
+          .sort((a, b) => a - b);
+      }
 
-      // SIEMPRE incluye 0 (mismo día) y filtra fuera de rango
-      let offsets = Array.from(new Set([...selected, 0]))
-        .filter(n => n >= 0 && n <= maxDays)
-        .sort((a, b) => a - b);
+      // Procesar archivos adjuntos
+      const npFilesEl = this.root.querySelector('#np-attachments');
+      const npTempAttachments = [];
+      
+      if (npFilesEl?.files?.length) {
+        for (const f of npFilesEl.files) {
+          const dataUrl = await window.PaymentManager.blobToDataUrl(f);
+          npTempAttachments.push({
+            name: f.name,
+            type: f.type || 'application/octet-stream',
+            size: f.size || 0,
+            dataUrl
+          });
+        }
+      }
 
-      // archivo (opcional): guarda un objectURL para previsualizar/descargar luego
-      const file = this.root.querySelector('#np_file')?.files?.[0] || null;
-      const attachmentUrl = file ? URL.createObjectURL(file) : null;
-      const attachmentName = file ? file.name : '';
-
-      // Guardar el pago (incluye hora)
+      // Guardar el pago (incluye hora y adjuntos)
       const payment = window.PaymentManager.addPayment({
         nombre,
         descripcion,
@@ -265,33 +318,20 @@ class NewPaymentModal {
         metodoPago: metodo,
         recurrencia,
         notasInternas: notas,
-        attachmentUrl,
-        attachmentName
+        attachments: npTempAttachments
       });
-
-      // Disparo de prueba en 10s (útil para validar notificaciones)
-      const testNow = this.root.querySelector('#np_test_now')?.checked;
-      if (testNow && window.RemindersAPI?.save) {
-        const id = `test_${crypto.randomUUID()}`;
-        const when = new Date(Date.now() + 10_000).toISOString();
-        await window.RemindersAPI.save({
-          id,
-          reminderTime: when,
-          title: `Prueba: ${nombre}`,
-          description: `Esto es una prueba de notificación.`
-        });
-      }
 
       window.dispatchEvent(new CustomEvent('paymentAdded', { detail: payment }));
       this.close();
     });
-    // Actualizar chips al cambiar fecha/hora
+    
+    // Actualizar chips al cambiar fecha/hora o recurrencia
     this.updateReminderChipsAvailability();
 
     this.root.querySelector('#np_datetime')?.addEventListener('input', () => this.updateReminderChipsAvailability());
     this.root.querySelector('#np_fecha')?.addEventListener('change', () => this.updateReminderChipsAvailability());
     this.root.querySelector('#np_hora')?.addEventListener('change', () => this.updateReminderChipsAvailability());
-
+    this.root.querySelector('#np_recurrencia')?.addEventListener('change', () => this.updateReminderChipsAvailability());
   }
 }
 
