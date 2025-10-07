@@ -257,69 +257,287 @@
         return String(val).split(/[|,]/).map(x => Number(x.trim())).filter(n => Number.isFinite(n));
       }
 
+      // === Parser mejorado de Excel con manejo de fechas ===
+      async function parseExcel(arrayBuffer) {
+        if (typeof XLSX === 'undefined') {
+          throw new Error('Librería XLSX no disponible.');
+        }
+        const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true, dateNF: 'yyyy-mm-dd' });
+        const firstSheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[firstSheetName];
+
+        // Obtenemos filas como matriz [ [header...], [row...], ... ]
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+        if (!rows.length) return [];
+
+        // Normalizador de headers
+        const norm = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').trim();
+
+        // Mapa de columnas esperadas -> claves internas
+        const headerMap = {
+          'id': 'id',
+          'nombre': 'nombre',
+          'name': 'nombre',
+          'descripcion': 'descripcion',
+          'description': 'descripcion',
+          'fecha': 'fecha',
+          'date': 'fecha',
+          'hora': 'hora',
+          'time': 'hora',
+          'hour': 'hora',
+          'monto': 'monto',
+          'amount': 'monto',
+          'estado': 'estado',
+          'status': 'estado',
+          'categoria': 'categoria',
+          'category': 'categoria',
+          'metodo de pago': 'metodopago',
+          'metodo pago': 'metodopago',
+          'metodopago': 'metodopago',
+          'metododepago': 'metodopago',
+          'paymentmethod': 'metodopago',
+          'recurrencia': 'recurrencia',
+          'recurrence': 'recurrencia',
+          'recordatorios (dias)': 'recordatorios',
+          'recordatorios': 'recordatorios',
+          'recordatoriosdias': 'recordatorios',
+          'reminders': 'recordatorios',
+          'notas': 'notas',
+          'notes': 'notas',
+          'adjuntos': 'adjuntos',
+          'attachments': 'adjuntos'
+        };
+
+        const headers = rows[0].map(norm);
+        const idx = headers.map(h => headerMap[h] || null);
+
+        // Convierte Excel date/number/string a ISO entendible
+        const toISO = (val, hora='09:00') => {
+          console.log('toISO - Valor recibido:', val, 'Tipo:', typeof val, 'Hora:', hora);
+          
+          // Si es un objeto Date válido
+          if (val instanceof Date && !isNaN(val)) {
+            const d = new Date(val);
+            const [hh,mm] = String(hora||'09:00').slice(0,5).split(':');
+            d.setHours(parseInt(hh||'9',10), parseInt(mm||'0',10), 0, 0);
+            console.log('toISO - Date convertido:', d.toISOString());
+            return d.toISOString();
+          }
+          
+          // Si es un número (Excel serial date)
+          if (typeof val === 'number' && val > 0) {
+            // Excel guarda fechas como número de días desde 1900-01-01
+            const excelEpoch = new Date(1899, 11, 30); // 30 de diciembre de 1899
+            const d = new Date(excelEpoch.getTime() + val * 86400000);
+            const [hh,mm] = String(hora||'09:00').slice(0,5).split(':');
+            d.setHours(parseInt(hh||'9',10), parseInt(mm||'0',10), 0, 0);
+            console.log('toISO - Excel serial convertido:', d.toISOString());
+            return d.toISOString();
+          }
+          
+          // Si es string
+          const s = String(val ?? '').trim();
+          if (!s || s === 'null' || s === 'undefined') {
+            console.log('toISO - String vacío o inválido');
+            return null;
+          }
+
+          // Si ya es un string ISO válido (contiene T y Z o +/-)
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) {
+            console.log('toISO - Ya es ISO válido:', s);
+            // Intentar parsear directamente
+            const d = new Date(s);
+            if (!isNaN(d)) {
+              // Aplicar la hora si se especificó diferente
+              if (hora && hora !== '09:00') {
+                const [hh,mm] = String(hora).slice(0,5).split(':');
+                d.setHours(parseInt(hh||'9',10), parseInt(mm||'0',10), 0, 0);
+              }
+              console.log('toISO - ISO parseado:', d.toISOString());
+              return d.toISOString();
+            }
+          }
+
+          // dd/mm/aaaa → aaaa-mm-dd
+          const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          let ymd = s;
+          if (m) {
+            const [_, d, mo, y] = m;
+            ymd = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          }
+          
+          // Intentar parsear como formato estándar
+          const iso = new Date(`${ymd}T${String(hora||'09:00').slice(0,5)}:00`);
+          if (isNaN(iso)) {
+            console.log('toISO - No se pudo parsear:', ymd);
+            return null;
+          }
+          
+          console.log('toISO - String convertido:', iso.toISOString());
+          return iso.toISOString();
+        };
+
+        // A filas normalizadas
+        const out = [];
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          if (!row || row.length === 0) continue;
+
+          const obj = {};
+          for (let c = 0; c < idx.length; c++) {
+            const key = idx[c];
+            if (!key) continue;
+            obj[key] = row[c];
+          }
+
+          // Mapea a las claves usadas en el import
+          const horaStr = String(obj.hora || '09:00').slice(0,5);
+          const fechaISO = toISO(obj.fecha, horaStr);
+          
+          out.push({
+            id: obj.id,
+            nombre: obj.nombre,
+            descripcion: obj.descripcion,
+            fecha: fechaISO,
+            hora: horaStr,
+            monto: obj.monto,
+            estado: obj.estado,
+            categoria: obj.categoria,
+            metodopago: obj.metodopago,
+            recurrencia: obj.recurrencia,
+            recordatorios: obj.recordatorios,
+            notas: obj.notas,
+            adjuntos: obj.adjuntos
+          });
+        }
+        return out;
+      }
+
       input.addEventListener('change', async () => {
         const file = input.files?.[0];
-        if (!file) return;
+        if (!file) {
+          console.log('No se seleccionó archivo');
+          return;
+        }
+
+        console.log('Archivo seleccionado:', file.name, 'Tipo:', file.type);
+
         try {
+          const name = file.name.toLowerCase();
           let rows = [];
-          const fileName = file.name.toLowerCase();
-          
-          // Detectar tipo de archivo
-          if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-            // Leer archivo Excel
-            const arrayBuffer = await file.arrayBuffer();
-            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            rows = XLSX.utils.sheet_to_json(firstSheet);
-          } else if (fileName.endsWith('.json')) {
-            // Leer JSON
+
+          if (name.endsWith('.json')) {
+            console.log('Procesando JSON...');
             const text = await file.text();
             rows = JSON.parse(text);
-          } else {
-            // Leer CSV
+            console.log('Filas JSON parseadas:', rows.length);
+            // Normalizar rows de JSON
+            rows = rows.map(r => normalizeRow(r));
+
+          } else if (name.endsWith('.csv')) {
+            console.log('Procesando CSV...');
             const text = await file.text();
             rows = parseCSV(text);
+            console.log('Filas CSV parseadas:', rows.length);
+            // Normalizar rows de CSV
+            rows = rows.map(r => normalizeRow(r));
+
+          } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+            console.log('Procesando Excel...');
+            const ab = await file.arrayBuffer();
+            rows = await parseExcel(ab);
+            console.log('Filas Excel parseadas:', rows.length);
+            // Ya vienen normalizadas de parseExcel
+
+          } else {
+            alert('Formato no soportado. Usa .csv, .json, .xlsx o .xls');
+            input.value = '';
+            return;
           }
 
+          if (!rows || rows.length === 0) {
+            alert('El archivo no contiene datos válidos.');
+            input.value = '';
+            return;
+          }
+
+          console.log('Iniciando importación de', rows.length, 'filas...');
+
+          // Normalización final y alta en PaymentManager
           let created = 0;
-          for (const r of rows) {
-            // Normalizar claves
-            const nr = normalizeRow(r);
+          let skipped = 0;
+          
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            console.log(`Procesando fila ${i + 1}:`, r);
+
+            // Para CSV/JSON, parsear fecha si no viene de Excel
+            let fechaISO = r.fecha;
             
-            // Mapear campos con diferentes nombres posibles
-            const fechaISO = parseFechaHora({
-              fecha: nr.fecha || nr.date,
-              hora: nr.hora || nr.time || nr.hour
-            });
+            // Si ya es un string ISO válido, usarlo directamente
+            if (typeof fechaISO === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(fechaISO)) {
+              console.log(`Fila ${i + 1}: Fecha ISO válida detectada:`, fechaISO);
+              // Ya es válido, no hacer nada
+            } else if (!fechaISO || typeof fechaISO === 'string') {
+              // Intentar parsear con parseFechaHora para CSV/JSON
+              fechaISO = parseFechaHora({
+                fecha: r.fecha || r.date,
+                hora: r.hora || r.time || r.hour
+              });
+            }
             
-            if (!fechaISO) continue;
+            if (!fechaISO) {
+              console.warn(`Fila ${i + 1}: Fecha inválida, saltando...`);
+              skipped++;
+              continue;
+            }
+            
+            console.log(`Fila ${i + 1}: Fecha final a usar:`, fechaISO);
+
+            const attachments =
+              typeof r.adjuntos === 'string'
+                ? r.adjuntos.split(',').map(s => ({ name: s.trim() })).filter(a => a.name)
+                : (Array.isArray(r.adjuntos) ? r.adjuntos : []);
 
             const pago = {
-              nombre: nr.nombre || nr.name || 'Pago',
-              descripcion: nr.descripcion || nr.description || '',
-              categoria: nr.categoria || nr.category || '',
+              nombre: r.nombre || r.name || 'Pago',
+              descripcion: r.descripcion || r.description || '',
+              categoria: window.PaymentManager?.normalizeCategory
+                         ? window.PaymentManager.normalizeCategory(r.categoria || r.category)
+                         : (r.categoria || r.category || 'Otros'),
               fecha: fechaISO,
-              hora: (nr.hora || nr.time || nr.hour || '09:00').slice(0,5),
-              monto: Number(nr.monto || nr.amount || 0) || 0,
-              estado: (nr.estado || nr.status || '').trim(),
-              reminderOffsetsDays: toArray(nr.recordatorios || nr.recordatoriosdias || nr.reminders || [7,3,1,0]),
-              metodoPago: nr.metodopago || nr.metododepago || nr.paymentmethod || '',
-              recurrencia: nr.recurrencia || nr.recurrence || 'Único',
-              notasInternas: nr.notas || nr.notes || '',
-              attachmentUrl: null,
-              attachmentName: ''
+              hora: (r.hora || r.time || r.hour || '09:00').slice(0,5),
+              monto: Number(String(r.monto || r.amount || '0').toString().replace(/[^\d.,-]/g, '').replace(',', '.')) || 0,
+              estado: (r.estado || r.status || '').trim(),
+              reminderOffsetsDays: toArray(r.recordatorios || r.recordatoriosdias || r.reminders || [7,3,1,0]),
+              metodoPago: r.metodopago || r.metododepago || r.paymentmethod || '',
+              recurrencia: r.recurrencia || r.recurrence || 'Único',
+              notasInternas: r.notas || r.notes || '',
+              attachments
             };
 
-            // Usa tu fuente de verdad para guardar (dispara eventos y agenda recordatorios)
-            const createdRec = window.PaymentManager?.addPayment?.(pago);
-            if (createdRec) created++;
+            console.log(`Fila ${i + 1} - Pago a crear:`, pago);
+
+            try {
+              const ok = window.PaymentManager?.addPayment?.(pago);
+              if (ok) {
+                created++;
+                console.log(`Fila ${i + 1}: Pago creado exitosamente`);
+              } else {
+                console.warn(`Fila ${i + 1}: No se pudo crear el pago`);
+                skipped++;
+              }
+            } catch (err) {
+              console.error(`Fila ${i + 1}: Error al crear pago:`, err);
+              skipped++;
+            }
           }
 
-          // refresca tarjetas en Inicio (sus oyentes ya escuchan paymentAdded/storage)
-          alert(`Se importaron ${created} pago(s).`);
+          console.log(`Importación completada: ${created} creados, ${skipped} saltados`);
+          alert(`Se importaron ${created} pago(s).${skipped > 0 ? ` (${skipped} filas saltadas)` : ''}`);
         } catch (err) {
-          console.error(err);
-          alert('No se pudo importar el archivo. Revisa el formato.');
+          console.error('Error en importación:', err);
+          alert(`Error al importar: ${err.message}\n\nRevisa la consola del navegador (F12) para más detalles.`);
         } finally {
           input.value = '';
         }
